@@ -20,25 +20,41 @@ const C = {
   destructive: "#D44C3C",
 };
 
-const FALLBACK = [
-  "That's really interesting. What made that moment stand out for you?",
-  "How did that make you feel in the moment?",
-  "It sounds like that was significant. What would you take away from it?",
-  "I hear you. What do you think you'd do differently next time?",
-  "Tell me more about how you handled it.",
-];
-
 async function callGemini(userName: string, messages: Message[]): Promise<string> {
   const apiKey = process.env.EXPO_PUBLIC_GEMINI_KEY;
-  if (!apiKey) return FALLBACK[Math.floor(Math.random() * FALLBACK.length)];
+  if (!apiKey) {
+    console.warn("[VoiceChat] EXPO_PUBLIC_GEMINI_KEY not set — using offline mode");
+    return "I'm currently offline. Please check the API key configuration.";
+  }
 
-  const firstUserIdx = messages.findIndex((m) => m.sender === "user");
-  if (firstUserIdx === -1) return FALLBACK[0];
+  // 전체 대화 기록을 user/model 번갈아가며 전달
+  // Gemini는 반드시 user 턴으로 시작해야 함
+  const contents: { role: string; parts: { text: string }[] }[] = [];
+  for (const m of messages) {
+    const role = m.sender === "user" ? "user" : "model";
+    // 연속된 같은 role 합치기 (Gemini 제약)
+    if (contents.length > 0 && contents[contents.length - 1].role === role) {
+      contents[contents.length - 1].parts[0].text += "\n" + m.text;
+    } else {
+      contents.push({ role, parts: [{ text: m.text }] });
+    }
+  }
+  // Gemini는 user 턴으로 시작해야 함
+  if (contents[0]?.role === "model") contents.shift();
+  // 마지막이 user 턴이어야 함
+  if (contents[contents.length - 1]?.role !== "user") {
+    return "Hmm, let me think about that.";
+  }
 
-  const contents = messages.slice(firstUserIdx).map((m) => ({
-    role: m.sender === "user" ? "user" : "model",
-    parts: [{ text: m.text }],
-  }));
+  const systemPrompt = `You are "AI Me", ${userName}'s personal AI companion. You are having a natural, warm conversation — not an interview.
+
+Rules:
+- Respond naturally to what they just said. Acknowledge it, react to it, relate to it.
+- Don't always end with a question. Sometimes just respond warmly and let the conversation breathe.
+- When you do ask a question, make it feel natural — like a friend asking, not a therapist prompting.
+- Keep responses to 2–3 sentences max.
+- Speak in a conversational, genuine tone. Avoid generic therapy phrases.
+- Remember everything said in the conversation.`;
 
   try {
     const res = await fetch(
@@ -47,19 +63,22 @@ async function callGemini(userName: string, messages: Message[]): Promise<string
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          systemInstruction: {
-            parts: [{ text: `You are "AI Me", a warm and empathetic AI memoir companion for ${userName}. Help them reflect on their day, experiences, and feelings. Keep every response short (1–2 sentences) and always end with one gentle follow-up question.` }],
-          },
+          systemInstruction: { parts: [{ text: systemPrompt }] },
           contents,
-          generationConfig: { maxOutputTokens: 150, temperature: 0.8 },
+          generationConfig: { maxOutputTokens: 200, temperature: 0.9 },
         }),
       }
     );
     const data = await res.json();
-    return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
-      ?? FALLBACK[Math.floor(Math.random() * FALLBACK.length)];
-  } catch {
-    return FALLBACK[Math.floor(Math.random() * FALLBACK.length)];
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    if (!text) {
+      console.warn("[VoiceChat] Gemini returned empty:", JSON.stringify(data));
+      return "I hear you. Tell me more.";
+    }
+    return text;
+  } catch (e) {
+    console.error("[VoiceChat] Gemini error:", e);
+    return "Sorry, I had trouble connecting. Try again?";
   }
 }
 
@@ -175,7 +194,7 @@ export function VoiceChat({ userName, avatarUri }: VoiceChatProps) {
         </Animated.View>
 
         <Text style={{ fontSize: 11, fontWeight: "700", color: C.primary, letterSpacing: 0.8, marginBottom: 10 }}>
-          AI ME  {isTyping ? "· thinking..." : "· listening"}
+          AI ME  {isTyping ? "· responding..." : "· listening"}
         </Text>
 
         {/* AI 말풍선 */}
