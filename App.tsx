@@ -19,6 +19,34 @@ export interface UserProfile {
   avatarUri: string | null;
 }
 
+const PROFILE_CACHE_KEY = "memoir_profile_v1";
+
+function saveProfileCache(p: UserProfile) {
+  if (Platform.OS === "web") {
+    try {
+      // base64 이미지는 너무 커서 URL만 저장
+      const toSave = { ...p, avatarUri: p.avatarUri?.startsWith("data:") ? null : p.avatarUri };
+      localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(toSave));
+    } catch {}
+  }
+}
+
+function loadProfileCache(): UserProfile | null {
+  if (Platform.OS === "web") {
+    try {
+      const s = localStorage.getItem(PROFILE_CACHE_KEY);
+      return s ? JSON.parse(s) : null;
+    } catch { return null; }
+  }
+  return null;
+}
+
+function clearProfileCache() {
+  if (Platform.OS === "web") {
+    try { localStorage.removeItem(PROFILE_CACHE_KEY); } catch {}
+  }
+}
+
 export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [loggedIn, setLoggedIn] = useState(false);
@@ -28,13 +56,17 @@ export default function App() {
   const [completedGoals, setCompletedGoals] = useState(0);
 
   const loadProfile = async (userId: string) => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("profiles")
       .select("*")
       .eq("id", userId)
-      .single();
+      .maybeSingle();
     if (data) {
-      setProfile({ name: data.name, avatarUri: data.avatar_url, reflectionTime: data.reflection_time });
+      const p: UserProfile = { name: data.name, avatarUri: data.avatar_url, reflectionTime: data.reflection_time };
+      setProfile(p);
+      saveProfileCache(p);
+    } else if (error) {
+      console.error("[App] loadProfile error:", error.message);
     }
   };
 
@@ -45,6 +77,9 @@ export default function App() {
       clearTimeout(fallback);
       if (session?.user) {
         setLoggedIn(true);
+        // 캐시에서 즉시 로드 → Supabase 쿼리 기다리는 동안 온보딩 안 보임
+        const cached = loadProfileCache();
+        if (cached) setProfile(cached);
         await loadProfile(session.user.id);
       }
       setAuthReady(true);
@@ -56,10 +91,15 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
         setLoggedIn(true);
-        if (event === "SIGNED_IN") await loadProfile(session.user.id);
+        if (event === "SIGNED_IN") {
+          const cached = loadProfileCache();
+          if (cached) setProfile(cached);
+          await loadProfile(session.user.id);
+        }
       } else {
         setLoggedIn(false);
         setProfile(null);
+        clearProfileCache();
       }
     });
 
@@ -75,14 +115,17 @@ export default function App() {
 
   const handleOnboardingComplete = async (p: UserProfile) => {
     setProfile(p);
+    saveProfileCache(p);
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user) {
-      await supabase.from("profiles").upsert({
+      const { error } = await supabase.from("profiles").upsert({
         id: session.user.id,
         name: p.name,
-        avatar_url: p.avatarUri,
+        // base64는 Supabase에 저장 안 함 (너무 큼) → URL만 저장
+        avatar_url: p.avatarUri?.startsWith("data:") ? null : p.avatarUri,
         reflection_time: p.reflectionTime,
       });
+      if (error) console.error("[App] profile upsert error:", error.message);
     }
   };
 

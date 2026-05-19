@@ -57,29 +57,37 @@ Rules:
 - Remember everything said in the conversation.`;
 
   try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt }] },
-          contents,
-          generationConfig: { maxOutputTokens: 200, temperature: 0.9 },
-        }),
+  const models = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"];
+  for (const model of models) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: systemPrompt }] },
+            contents,
+            generationConfig: { maxOutputTokens: 200, temperature: 0.9 },
+          }),
+        }
+      );
+      const data = await res.json();
+      if (data.error?.code === 429) {
+        console.warn(`[VoiceChat] ${model} rate limited, trying next...`);
+        continue;
       }
-    );
-    const data = await res.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-    if (!text) {
-      console.warn("[VoiceChat] Gemini returned empty:", JSON.stringify(data));
-      return "I hear you. Tell me more.";
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (!text) {
+        console.warn("[VoiceChat] Empty response from", model, JSON.stringify(data));
+        continue;
+      }
+      return text;
+    } catch (e) {
+      console.error("[VoiceChat] Error with", model, e);
     }
-    return text;
-  } catch (e) {
-    console.error("[VoiceChat] Gemini error:", e);
-    return "Sorry, I had trouble connecting. Try again?";
   }
+  return "I'm having trouble connecting right now. Please try again in a moment.";
 }
 
 export function VoiceChat({ userName, avatarUri }: VoiceChatProps) {
