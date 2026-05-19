@@ -23,40 +23,35 @@ const C = {
 async function callGemini(userName: string, messages: Message[]): Promise<string> {
   const apiKey = process.env.EXPO_PUBLIC_GEMINI_KEY;
   if (!apiKey) {
-    console.warn("[VoiceChat] EXPO_PUBLIC_GEMINI_KEY not set — using offline mode");
-    return "I'm currently offline. Please check the API key configuration.";
+    console.warn("[VoiceChat] EXPO_PUBLIC_GEMINI_KEY not set");
+    return "API 키가 설정되지 않았습니다.";
   }
 
-  // 전체 대화 기록을 user/model 번갈아가며 전달
-  // Gemini는 반드시 user 턴으로 시작해야 함
+  // Gemini 형식: user/model 번갈아, user로 시작, user로 끝
   const contents: { role: string; parts: { text: string }[] }[] = [];
   for (const m of messages) {
     const role = m.sender === "user" ? "user" : "model";
-    // 연속된 같은 role 합치기 (Gemini 제약)
     if (contents.length > 0 && contents[contents.length - 1].role === role) {
       contents[contents.length - 1].parts[0].text += "\n" + m.text;
     } else {
       contents.push({ role, parts: [{ text: m.text }] });
     }
   }
-  // Gemini는 user 턴으로 시작해야 함
-  if (contents[0]?.role === "model") contents.shift();
-  // 마지막이 user 턴이어야 함
-  if (contents[contents.length - 1]?.role !== "user") {
-    return "Hmm, let me think about that.";
+  while (contents.length > 0 && contents[0].role === "model") contents.shift();
+  if (contents.length === 0 || contents[contents.length - 1].role !== "user") {
+    return "계속 말씀해 주세요.";
   }
 
-  const systemPrompt = `You are "AI Me", ${userName}'s personal AI companion. You are having a natural, warm conversation — not an interview.
+  const systemPrompt = `너는 "${userName}"의 개인 AI 대화 상대야. 따뜻하고 자연스럽게 대화해.
 
-Rules:
-- Respond naturally to what they just said. Acknowledge it, react to it, relate to it.
-- Don't always end with a question. Sometimes just respond warmly and let the conversation breathe.
-- When you do ask a question, make it feel natural — like a friend asking, not a therapist prompting.
-- Keep responses to 2–3 sentences max.
-- Speak in a conversational, genuine tone. Avoid generic therapy phrases.
-- Remember everything said in the conversation.`;
+규칙:
+- 상대방이 한국어로 말하면 한국어로, 영어로 말하면 영어로 답해.
+- 방금 한 말에 진심으로 반응해. 공감하고, 맞장구치고, 자연스럽게 이어가.
+- 매번 질문으로 끝낼 필요 없어. 그냥 대화처럼 흘러가게 해.
+- 답변은 2~3문장 이내로 짧게.
+- 상담사처럼 말하지 말고 친구처럼 말해.
+- 이전 대화 내용을 기억하고 연결해서 말해.`;
 
-  try {
   const models = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"];
   for (const model of models) {
     try {
@@ -68,32 +63,32 @@ Rules:
           body: JSON.stringify({
             systemInstruction: { parts: [{ text: systemPrompt }] },
             contents,
-            generationConfig: { maxOutputTokens: 200, temperature: 0.9 },
+            generationConfig: { maxOutputTokens: 250, temperature: 0.9 },
           }),
         }
       );
       const data = await res.json();
       if (data.error?.code === 429) {
-        console.warn(`[VoiceChat] ${model} rate limited, trying next...`);
+        console.warn(`[VoiceChat] ${model} 429, trying next model...`);
+        continue;
+      }
+      if (data.error) {
+        console.error(`[VoiceChat] ${model} error:`, data.error.message);
         continue;
       }
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-      if (!text) {
-        console.warn("[VoiceChat] Empty response from", model, JSON.stringify(data));
-        continue;
-      }
-      return text;
+      if (text) return text;
     } catch (e) {
-      console.error("[VoiceChat] Error with", model, e);
+      console.error("[VoiceChat] fetch error with", model, e);
     }
   }
-  return "I'm having trouble connecting right now. Please try again in a moment.";
+  return "지금 연결이 어렵네요. 잠시 후 다시 시도해 주세요.";
 }
 
 export function VoiceChat({ userName, avatarUri }: VoiceChatProps) {
   const [messages, setMessages] = useState<Message[]>([{
     id: 1,
-    text: `Hey ${userName}, I'm here. How are you feeling today?`,
+    text: `안녕 ${userName}! 오늘 어떻게 지냈어?`,
     sender: "ai",
     timestamp: new Date(),
   }]);
@@ -163,7 +158,7 @@ export function VoiceChat({ userName, avatarUri }: VoiceChatProps) {
         const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
         if (!SR) { Alert.alert("Not supported", "Try Chrome or Safari."); return; }
         const r = new SR();
-        r.lang = navigator.language || "ko-KR";
+        r.lang = "ko-KR";
         r.continuous = false;
         r.interimResults = false;
         r.onresult = (e: any) => { setIsRecording(false); send(e.results[0][0].transcript); };
@@ -202,7 +197,7 @@ export function VoiceChat({ userName, avatarUri }: VoiceChatProps) {
         </Animated.View>
 
         <Text style={{ fontSize: 11, fontWeight: "700", color: C.primary, letterSpacing: 0.8, marginBottom: 10 }}>
-          AI ME  {isTyping ? "· responding..." : "· listening"}
+          AI ME  {isTyping ? "· 답변 중..." : "· 듣는 중"}
         </Text>
 
         {/* AI 말풍선 */}
@@ -244,7 +239,7 @@ export function VoiceChat({ userName, avatarUri }: VoiceChatProps) {
           </View>
         ) : (
           <View style={{ height: 48, width: "100%", borderRadius: 18, borderWidth: 1, borderColor: C.border, borderStyle: "dashed", alignItems: "center", justifyContent: "center" }}>
-            <Text style={{ fontSize: 13, color: C.muted + "88" }}>Tap the mic or type to begin</Text>
+            <Text style={{ fontSize: 13, color: C.muted + "88" }}>마이크를 누르거나 입력해서 시작하세요</Text>
           </View>
         )}
       </View>
@@ -258,7 +253,7 @@ export function VoiceChat({ userName, avatarUri }: VoiceChatProps) {
             ))}
           </View>
           <Text style={{ fontSize: 13, color: C.primary, fontWeight: "600" }}>
-            {Platform.OS === "web" ? "Listening..." : "Recording..."}
+            {Platform.OS === "web" ? "듣고 있어요..." : "녹음 중..."}
           </Text>
         </View>
       )}
@@ -277,7 +272,7 @@ export function VoiceChat({ userName, avatarUri }: VoiceChatProps) {
           onChangeText={setInput}
           onSubmitEditing={() => send()}
           returnKeyType="send"
-          placeholder="Say something..."
+          placeholder="메시지를 입력하세요..."
           placeholderTextColor={C.muted + "88"}
           style={{ flex: 1, height: 46, backgroundColor: C.secondary, borderRadius: 14, borderWidth: 1, borderColor: C.border, paddingHorizontal: 14, fontSize: 14, color: C.foreground }}
         />
