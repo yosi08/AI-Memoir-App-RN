@@ -30,12 +30,20 @@ export function TodoList({ onCompletedCountChange }: TodoListProps) {
   const pct = todos.length ? (done / todos.length) * 100 : 0;
 
   useEffect(() => {
+    const timeout = setTimeout(() => setLoading(false), 6000);
     supabase
       .from("todos")
       .select("*")
       .order("created_at")
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        clearTimeout(timeout);
+        if (error) console.error("[TodoList] fetch error:", error.message);
         if (data) setTodos(data);
+        setLoading(false);
+      })
+      .catch((e) => {
+        clearTimeout(timeout);
+        console.error("[TodoList] unexpected error:", e);
         setLoading(false);
       });
   }, []);
