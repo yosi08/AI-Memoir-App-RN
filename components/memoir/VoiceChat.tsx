@@ -20,26 +20,11 @@ const C = {
   destructive: "#D44C3C",
 };
 
-async function callGemini(userName: string, messages: Message[]): Promise<string> {
-  const apiKey = process.env.EXPO_PUBLIC_GEMINI_KEY;
+async function callAI(userName: string, messages: Message[]): Promise<string> {
+  const apiKey = process.env.EXPO_PUBLIC_GROQ_KEY;
   if (!apiKey) {
-    console.warn("[VoiceChat] EXPO_PUBLIC_GEMINI_KEY not set");
-    return "API 키가 설정되지 않았습니다.";
-  }
-
-  // Gemini 형식: user/model 번갈아, user로 시작, user로 끝
-  const contents: { role: string; parts: { text: string }[] }[] = [];
-  for (const m of messages) {
-    const role = m.sender === "user" ? "user" : "model";
-    if (contents.length > 0 && contents[contents.length - 1].role === role) {
-      contents[contents.length - 1].parts[0].text += "\n" + m.text;
-    } else {
-      contents.push({ role, parts: [{ text: m.text }] });
-    }
-  }
-  while (contents.length > 0 && contents[0].role === "model") contents.shift();
-  if (contents.length === 0 || contents[contents.length - 1].role !== "user") {
-    return "계속 말씀해 주세요.";
+    console.warn("[VoiceChat] EXPO_PUBLIC_GROQ_KEY not set");
+    return "API 키가 설정되지 않았습니다. Vercel 환경변수에 EXPO_PUBLIC_GROQ_KEY를 추가해주세요.";
   }
 
   const systemPrompt = `너는 "${userName}"의 개인 AI 대화 상대야. 따뜻하고 자연스럽게 대화해.
@@ -52,38 +37,38 @@ async function callGemini(userName: string, messages: Message[]): Promise<string
 - 상담사처럼 말하지 말고 친구처럼 말해.
 - 이전 대화 내용을 기억하고 연결해서 말해.`;
 
-  const models = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"];
-  for (const model of models) {
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: systemPrompt }] },
-            contents,
-            generationConfig: { maxOutputTokens: 250, temperature: 0.9 },
-          }),
-        }
-      );
-      const data = await res.json();
-      if (data.error?.code === 429) {
-        console.warn(`[VoiceChat] ${model} 429 quota exhausted, trying next...`);
-        if (model === models[models.length - 1]) {
-          return "Gemini API 할당량 초과. aistudio.google.com에서 새 API 키를 발급받아 Vercel 환경변수를 교체해주세요.";
-        }
-        continue;
-      }
-      if (data.error) {
-        console.error(`[VoiceChat] ${model} error:`, data.error.message);
-        continue;
-      }
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-      if (text) return text;
-    } catch (e) {
-      console.error("[VoiceChat] fetch error with", model, e);
+  // OpenAI 호환 형식으로 변환
+  const chatMessages = [
+    { role: "system", content: systemPrompt },
+    ...messages.map((m) => ({
+      role: m.sender === "user" ? "user" : "assistant",
+      content: m.text,
+    })),
+  ];
+
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        messages: chatMessages,
+        max_tokens: 250,
+        temperature: 0.9,
+      }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      console.error("[VoiceChat] Groq error:", data.error.message);
+      return `오류: ${data.error.message}`;
     }
+    const text = data.choices?.[0]?.message?.content?.trim();
+    if (text) return text;
+  } catch (e) {
+    console.error("[VoiceChat] Groq fetch error:", e);
   }
   return "지금 연결이 어렵네요. 잠시 후 다시 시도해 주세요.";
 }
@@ -150,7 +135,7 @@ export function VoiceChat({ userName, avatarUri }: VoiceChatProps) {
     setInput("");
     setIsTyping(true);
 
-    const aiText = await callGemini(userName, updated);
+    const aiText = await callAI(userName, updated);
     setIsTyping(false);
     setMessages((p) => [...p, { id: Date.now() + 1, text: aiText, sender: "ai", timestamp: new Date() }]);
   };
