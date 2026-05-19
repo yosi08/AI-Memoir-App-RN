@@ -19,12 +19,14 @@ export function LoginScreen() {
 
   const signInWithGoogle = async () => {
     setLoading(true);
-    await supabase.auth.signInWithOAuth({
+    const redirectTo = Platform.OS === "web"
+      ? `${window.location.origin}/`
+      : undefined;
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: {
-        redirectTo: Platform.OS === "web" ? window.location.origin : undefined,
-      },
+      options: { redirectTo, queryParams: { access_type: "offline", prompt: "consent" } },
     });
+    if (error) console.error("Google login error:", error.message);
     setLoading(false);
   };
 
