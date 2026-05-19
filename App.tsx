@@ -124,18 +124,22 @@ export default function App() {
         <StatusBar barStyle="dark-content" backgroundColor="#FAF8F5" />
         <SafeAreaView style={{ flex: 1, backgroundColor: "#FAF8F5" }}>
           <View style={{ flex: 1 }}>
-            {activeTab === "dashboard" && (
+            <View style={{ flex: 1, display: activeTab === "dashboard" ? "flex" : "none" }}>
               <Dashboard
                 profile={profile}
                 moodPercent={Math.min(completedGoals, 100)}
                 onStartReflection={() => setActiveTab("chat")}
               />
-            )}
-            {activeTab === "todos" && (
+            </View>
+            <View style={{ flex: 1, display: activeTab === "todos" ? "flex" : "none" }}>
               <TodoList onCompletedCountChange={setCompletedGoals} />
-            )}
-            {activeTab === "chat" && <VoiceChat userName={profile.name} avatarUri={profile.avatarUri} />}
-            {activeTab === "notifications" && <NotificationDemo />}
+            </View>
+            <View style={{ flex: 1, display: activeTab === "chat" ? "flex" : "none" }}>
+              <VoiceChat userName={profile.name} avatarUri={profile.avatarUri} />
+            </View>
+            <View style={{ flex: 1, display: activeTab === "notifications" ? "flex" : "none" }}>
+              <NotificationDemo />
+            </View>
           </View>
           <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
           <NotificationOverlay
