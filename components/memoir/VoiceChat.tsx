@@ -69,7 +69,10 @@ async function callGemini(userName: string, messages: Message[]): Promise<string
       );
       const data = await res.json();
       if (data.error?.code === 429) {
-        console.warn(`[VoiceChat] ${model} 429, trying next model...`);
+        console.warn(`[VoiceChat] ${model} 429 quota exhausted, trying next...`);
+        if (model === models[models.length - 1]) {
+          return "Gemini API 할당량 초과. aistudio.google.com에서 새 API 키를 발급받아 Vercel 환경변수를 교체해주세요.";
+        }
         continue;
       }
       if (data.error) {
