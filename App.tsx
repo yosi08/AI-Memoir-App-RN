@@ -39,11 +39,17 @@ export default function App() {
   };
 
   useEffect(() => {
+    const fallback = setTimeout(() => setAuthReady(true), 5000);
+
     supabase.auth.getSession().then(async ({ data: { session } }) => {
+      clearTimeout(fallback);
       if (session?.user) {
         setLoggedIn(true);
         await loadProfile(session.user.id);
       }
+      setAuthReady(true);
+    }).catch(() => {
+      clearTimeout(fallback);
       setAuthReady(true);
     });
 
